@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OB Lite Client · 三版工作区设计</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #f0eee9; }
+  * { box-sizing: border-box; }
+  .ob-frame { width: 100%; height: 100%; border-radius: 12px; overflow: hidden; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="data.js"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="workspace_v1.jsx"></script>
+<script type="text/babel" src="workspace_v2.jsx"></script>
+<script type="text/babel" src="workspace_v3.jsx"></script>
+
+<script type="text/babel">
+  const { useState, useEffect } = React;
+
+  function App() {
+    const [ready, setReady] = useState(false);
+    useEffect(() => {
+      const t = setInterval(() => {
+        if (window.DesignCanvas && window.WorkspaceV1 && window.WorkspaceV2 && window.WorkspaceV3) {
+          setReady(true); clearInterval(t);
+        }
+      }, 30);
+      return () => clearInterval(t);
+    }, []);
+    if (!ready) return null;
+
+    const { DesignCanvas, DCSection, DCArtboard } = window;
+    const W = 1340, H = 860;
+
+    const frame = (Comp) => (
+      <div className="ob-frame"><Comp /></div>
+    );
+
+    return (
+      <DesignCanvas>
+        <DCSection id="workspace" title="OB Lite Client · 主工作区" subtitle="同一份订单中心数据，三种设计方向 — 浏览 · SQL 编辑 · 执行结果">
+          <DCArtboard id="v1" label="V1 · 原生 macOS — 中性灰、统一工具栏、编辑器叠放结果" width={W} height={H}>
+            {frame(window.WorkspaceV1)}
+          </DCArtboard>
+          <DCArtboard id="v2" label="V2 · 专业开发者工具 — 图标侧栏、等宽、底部停靠结果+子标签、信息状态栏" width={W} height={H}>
+            {frame(window.WorkspaceV2)}
+          </DCArtboard>
+          <DCArtboard id="v3" label="V3 · 现代极简 — 浮起圆角卡片、药丸标签、宽松呼吸感" width={W} height={H}>
+            {frame(window.WorkspaceV3)}
+          </DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+@keyframes ob-spin-kf { to { transform: rotate(360deg); } }
+.ob-spin { animation: ob-spin-kf 0.7s linear infinite; }
+
+@keyframes obSlide { from { transform: translateX(30px); opacity: 0.4; } to { transform: none; opacity: 1; } }
+@keyframes obIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.ob-tab-x:hover { background: #f3f3f1; color: #1f2024 !important; }
+.ob-split:hover .ob-split-grip { background: #2f6bdd; }
+.ob-split:active .ob-split-grip { background: #2f6bdd; }
+.ob-menu-item:hover { background: #eef3fd; color: #2f6bdd; }
+
+* { scrollbar-width: thin; scrollbar-color: #d4d4d0 transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb { background: #d4d4d0; border-radius: 6px; border: 2px solid #fff; }
+*::-webkit-scrollbar-track { background: transparent; }
+button:active { transform: translateY(0.5px); }
+
+input::placeholder, textarea::placeholder { color: #a3a4ab; }
+
+/* let the app own text selection; CodeMirror manages its own */
+body { -webkit-user-select: none; user-select: none; }
+input, textarea, .cm-editor { -webkit-user-select: text; user-select: text; }

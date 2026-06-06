@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OB Lite Client · 交互原型</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #e8e8e4; }
+  * { box-sizing: border-box; }
+  #root { height: 100%; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="proto-data.js"></script>
+<script type="text/babel" src="proto-grid.jsx"></script>
+<script type="text/babel" src="proto-sidebar.jsx"></script>
+<script type="text/babel" src="proto-views.jsx"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback } = React;
+
+function initialWorkspaces() {
+  let pref = { layout: 'v', editorH: 168, editorPct: 48 };
+  try { pref = JSON.parse(localStorage.getItem('ob_layout_pref')) || pref; } catch (e) {}
+  const L = { layout: pref.layout, editorH: pref.editorH, editorPct: pref.editorPct };
+  return {
+    'p-order': { filter: '', activeTabId: 't1', tabs: [
+      { id: 't1', type: 'table', db: 'order_center', table: 'orders', label: 'orders', pageSize: 200, page: 1, sub: 'data' },
+      { id: 't2', type: 'query', label: '查询 1', sql: "SELECT *\nFROM orders\nWHERE status = 'PAID'\nORDER BY created_at DESC\nLIMIT 200;", status: 'idle', ...L },
+    ] },
+    'p-user': { filter: '', activeTabId: 'u1', tabs: [
+      { id: 'u1', type: 'table', db: 'user_center', table: 'users', label: 'users', pageSize: 200, page: 1, sub: 'data' },
+    ] },
+    'd-order': { filter: '', activeTabId: 'd1', tabs: [
+      { id: 'd1', type: 'table', db: 'order_center', table: 'customers', label: 'customers', pageSize: 200, page: 1, sub: 'data' },
+      { id: 'd2', type: 'table', db: 'order_center', table: 'order_items', label: 'order_items', pageSize: 100, page: 1, sub: 'data' },
+      { id: 'd3', type: 'query', label: '查询 1', sql: 'SELECT * FROM order_items LIMIT 100;', status: 'idle', ...L },
+    ] },
+    't-order': { filter: '', activeTabId: null, tabs: [] },
+  };
+}
+
+function App() {
+  const T = window.T;
+  const [activeConn, setActiveConn] = useState('p-order');
+  const [ws, setWs] = useState(initialWorkspaces);
+  const [connStatus, setConnStatus] = useState(() => {
+    const m = {}; window.OBP.connections.forEach((c) => m[c.id] = c.status); return m;
+  });
+  const [toast, setToast] = useState(null);
+  const [cell, setCell] = useState(null);
+  const [queryCounter, setQueryCounter] = useState({});
+  const [layoutPref, setLayoutPref] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ob_layout_pref')) || { layout: 'v', editorH: 168, editorPct: 48 }; }
+    catch (e) { return { layout: 'v', editorH: 168, editorPct: 48 }; }
+  });
+
+  const showToast = useCallback((msg) => { setToast(msg); }, []);
+  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 2000); return () => clearTimeout(t); }, [toast]);
+
+  const conn = { ...window.OBP.connections.find((c) => c.id === activeConn), status: connStatus[activeConn] };
+  const env = window.OBP.ENV[conn.env];
+  const wsData = ws[activeConn];
+  const activeTab = wsData.tabs.find((t) => t.id === wsData.activeTabId) || null;
+
+  const setFilter = (f) => setWs((w) => ({ ...w, [activeConn]: { ...w[activeConn], filter: f } }));
+
+  const openTable = (db, table) => {
+    setWs((w) => {
+      const cur = w[activeConn];
+      const exist = cur.tabs.find((t) => t.type === 'table' && t.db === db && t.table === table);
+      if (exist) return { ...w, [activeConn]: { ...cur, activeTabId: exist.id } };
+      const id = 'tb_' + Date.now();
+      const tab = { id, type: 'table', db, table, label: table, pageSize: 200, page: 1, sub: 'data' };
+      return { ...w, [activeConn]: { ...cur, tabs: [...cur.tabs, tab], activeTabId: id } };
+    });
+  };
+
+  const newQuery = () => {
+    setQueryCounter((qc) => ({ ...qc, [activeConn]: (qc[activeConn] || 1) + 1 }));
+    setWs((w) => {
+      const cur = w[activeConn];
+      const n = cur.tabs.filter((t) => t.type === 'query').length + 1;
+      const id = 'q_' + Date.now();
+      const tab = { id, type: 'query', label: '查询 ' + n, sql: '', status: 'idle', layout: layoutPref.layout, editorH: layoutPref.editorH, editorPct: layoutPref.editorPct };
+      return { ...w, [activeConn]: { ...cur, tabs: [...cur.tabs, tab], activeTabId: id } };
+    });
+  };
+
+  const activate = (id) => setWs((w) => ({ ...w, [activeConn]: { ...w[activeConn], activeTabId: id } }));
+
+  const closeTab = (id) => setWs((w) => {
+    const cur = w[activeConn];
+    const idx = cur.tabs.findIndex((t) => t.id === id);
+    const tabs = cur.tabs.filter((t) => t.id !== id);
+    let active = cur.activeTabId;
+    if (active === id) active = tabs.length ? tabs[Math.max(0, idx - 1)].id : null;
+    return { ...w, [activeConn]: { ...cur, tabs, activeTabId: active } };
+  });
+
+  const updateTab = (patch) => {
+    // layout choices are sticky globally: they become the default for new query
+    // tabs and persist across reloads.
+    if (patch.layout !== undefined || patch.editorH !== undefined || patch.editorPct !== undefined) {
+      setLayoutPref((p) => {
+        const np = { ...p };
+        if (patch.layout !== undefined) np.layout = patch.layout;
+        if (patch.editorH !== undefined) np.editorH = patch.editorH;
+        if (patch.editorPct !== undefined) np.editorPct = patch.editorPct;
+        try { localStorage.setItem('ob_layout_pref', JSON.stringify(np)); } catch (e) {}
+        return np;
+      });
+    }
+    setWs((w) => {
+      const cur = w[activeConn];
+      return { ...w, [activeConn]: { ...cur, tabs: cur.tabs.map((t) => t.id === cur.activeTabId ? { ...t, ...patch } : t) } };
+    });
+  };
+
+  const connect = () => { setConnStatus((s) => ({ ...s, [activeConn]: 'connected' })); showToast('已连接 · ' + conn.name); };
+
+  const activeKey = activeTab && activeTab.type === 'table' ? activeConn + '/' + activeTab.db + '/' + activeTab.table : null;
+  const connected = conn.status === 'connected';
+
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: T.canvas, fontFamily: T.sans, color: T.text, fontSize: 13, position: 'relative' }}>
+      {/* env stripe */}
+      <div style={{ height: conn.env === 'prod' ? 4 : 3, background: env.color, flexShrink: 0 }} />
+
+      {/* header */}
+      <div style={{ height: 56, display: 'flex', alignItems: 'center', gap: 14, padding: '0 18px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 7 }}>
+          {['#ff5f57', '#febc2e', '#28c840'].map((x) => <span key={x} style={{ width: 11, height: 11, borderRadius: '50%', background: x }} />)}
+        </div>
+        <div style={{ width: 1, height: 18, background: T.line }} />
+        <window.ConnectionSwitcher conn={conn} onSwitch={setActiveConn} onManage={() => showToast('连接管理（占位）：新增 / 编辑 / 删除 / 测试连接')} />
+        {connected && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: T.dim, fontSize: 13 }}>
+            <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{activeTab && activeTab.db ? activeTab.db : conn.primary}</span>
+            {activeTab && <><span style={{ color: T.faint }}>›</span>
+              <span style={{ background: T.blueSoft, color: T.blue, fontWeight: 600, padding: '3px 10px', borderRadius: 16, fontFamily: activeTab.type === 'table' ? T.mono : T.sans, fontSize: 12, whiteSpace: 'nowrap' }}>{activeTab.type === 'table' ? activeTab.table : activeTab.label}</span></>}
+          </div>
+        )}
+        <div style={{ flex: 1 }} />
+        {conn.env === 'prod' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, background: env.soft, color: env.color, padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, border: `1px solid ${env.ring}`, whiteSpace: 'nowrap', flexShrink: 0 }}>
+            <span>⚠</span> 生产环境 · 谨慎操作
+          </div>
+        )}
+        <window.Btn kind="default" onClick={() => showToast('已刷新数据库对象 · ' + conn.name)} style={{ width: 32, height: 32, padding: 0, justifyContent: 'center', fontSize: 14 }}>↻</window.Btn>
+      </div>
+
+      {/* body */}
+      {connected ? (
+        <div style={{ flex: 1, display: 'flex', gap: 14, padding: '0 14px 14px', minHeight: 0 }}>
+          <window.Sidebar conn={conn} filter={wsData.filter} onFilter={setFilter} onOpenTable={openTable} activeKey={activeKey} />
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <div style={{ padding: '0 4px', flexShrink: 0 }}>
+              <window.TabStrip tabs={wsData.tabs} activeId={wsData.activeTabId} env={conn.env} onActivate={activate} onClose={closeTab} onNewQuery={newQuery} />
+            </div>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              {!activeTab && <EmptyTabs onNewQuery={newQuery} />}
+              {activeTab && activeTab.type === 'table' && (
+                <window.TableView key={activeTab.id} conn={conn} tab={activeTab} onUpdateTab={updateTab} onToast={showToast} onViewCell={setCell} />
+              )}
+              {activeTab && activeTab.type === 'query' && (
+                <window.QueryView key={activeTab.id} conn={conn} tab={activeTab} onUpdateTab={updateTab} onToast={showToast} onViewCell={setCell} />
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <DisconnectedView conn={conn} env={env} onConnect={connect} />
+      )}
+
+      <window.CellDrawer cell={cell} onClose={() => setCell(null)} />
+      <window.Toast msg={toast} />
+    </div>
+  );
+}
+
+function EmptyTabs({ onNewQuery }) {
+  const T = window.T;
+  return (
+    <div style={{ flex: 1, background: T.card, borderRadius: 16, boxShadow: T.shadow, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, color: T.faint }}>
+      <div style={{ fontSize: 28 }}>▦</div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: T.dim }}>没有打开的标签页</div>
+      <div style={{ fontSize: 12.5 }}>从左侧点击一张表打开数据，或</div>
+      <window.Btn kind="primary" onClick={onNewQuery}>＋ 新建查询</window.Btn>
+    </div>
+  );
+}
+
+function DisconnectedView({ conn, env, onConnect }) {
+  const T = window.T;
+  return (
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14 }}>
+      <div style={{ background: T.card, borderRadius: 18, boxShadow: T.shadow, padding: 32, width: 440, textAlign: 'center' }}>
+        <div style={{ width: 52, height: 52, borderRadius: 14, background: env.soft, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 22, color: env.color }}>○</div>
+        <window.EnvBadge env={conn.env} />
+        <div style={{ fontSize: 18, fontWeight: 700, margin: '10px 0 4px' }}>{conn.name}</div>
+        <div style={{ fontFamily: T.mono, fontSize: 12.5, color: T.faint, marginBottom: 4 }}>{conn.user}</div>
+        <div style={{ fontFamily: T.mono, fontSize: 12.5, color: T.faint, marginBottom: 20 }}>{conn.host}:{conn.port}</div>
+        <div style={{ fontSize: 13, color: T.dim, marginBottom: 20, lineHeight: 1.6 }}>该连接当前未打开。点击下方按钮测试并建立连接，连接成功后即可浏览数据库对象。</div>
+        <window.Btn kind="primary" onClick={onConnect} style={{ width: '100%', justifyContent: 'center', padding: '10px' }}>测试并连接</window.Btn>
+      </div>
+    </div>
+  );
+}
+
+function Boot() {
+  const [ready, setReady] = React.useState(false);
+  React.useEffect(() => {
+    const t = setInterval(() => {
+      if (window.OBP && window.DataGrid && window.Sidebar && window.ConnectionSwitcher && window.TabStrip && window.TableView && window.QueryView) {
+        setReady(true); clearInterval(t);
+      }
+    }, 25);
+    return () => clearInterval(t);
+  }, []);
+  return ready ? <App /> : null;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Boot />);
+</script>
+</body>
+</html>
