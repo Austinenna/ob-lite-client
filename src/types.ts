@@ -97,21 +97,30 @@ export interface TableTab {
   where?: string;
 }
 
+/** Result of one statement within a (possibly multi-statement) execution. */
+export interface StatementResult {
+  sql: string;
+  status: "pending" | "running" | "rows" | "affected" | "error" | "cancelled" | "timeout";
+  result?: QueryResult;
+  error?: AppError;
+  page: number;
+  pageSize: number;
+}
+
 export interface QueryTab {
   id: string;
   type: "query";
   label: string;
   sql: string;
-  status: "idle" | "running" | "cancelling" | "rows" | "affected" | "error" | "cancelled" | "timeout";
   layout?: "v" | "h";
   focus?: "editor" | "results" | null;
   editorH?: number;
   editorPct?: number;
-  // last execution
-  result?: QueryResult;
-  error?: AppError;
-  queryId?: string;
-  executedSql?: string; // the SQL of the last run, reused when paging
+  // execution (a run splits sql into one StatementResult per statement)
+  status: "idle" | "running" | "cancelling" | "done";
+  results?: StatementResult[];
+  activeResult?: number;
+  queryId?: string; // id of the in-flight statement, for cancellation
 }
 
 export type Tab = TableTab | QueryTab;

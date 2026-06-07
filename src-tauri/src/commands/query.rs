@@ -20,19 +20,41 @@ const DEFAULT_TIMEOUT_SECS: u64 = 30;
 /// Returns `(sql_to_run, row_cap, is_paged)`.
 fn build_exec(sql: &str, page: u64, page_size: u64) -> (String, usize, bool) {
     let stripped = sql.trim().trim_end_matches(';').trim();
-    let kw = stripped.split_whitespace().next().unwrap_or("").to_uppercase();
+    // skip leading comments so the first keyword (and the wrapped subquery) are clean
+    let code = strip_leading_comments(stripped);
+    let kw = code.split_whitespace().next().unwrap_or("").to_uppercase();
     let pageable = kw == "SELECT" || kw == "WITH";
-    if pageable && !stripped.is_empty() {
+    if pageable && !code.is_empty() {
         let offset = page.saturating_sub(1) * page_size;
         let wrapped = format!(
             "SELECT * FROM ({}) AS `__ob_page` LIMIT {} OFFSET {}",
-            stripped,
+            code,
             page_size + 1,
             offset
         );
         (wrapped, (page_size + 1) as usize, true)
     } else {
         (sql.to_string(), DEFAULT_MAX_ROWS, false)
+    }
+}
+
+/// Remove leading line/block comments and whitespace from a statement.
+fn strip_leading_comments(input: &str) -> &str {
+    let mut s = input.trim_start();
+    loop {
+        if let Some(rest) = s.strip_prefix("--").or_else(|| s.strip_prefix('#')) {
+            match rest.find('\n') {
+                Some(nl) => s = rest[nl + 1..].trim_start(),
+                None => return "",
+            }
+        } else if let Some(rest) = s.strip_prefix("/*") {
+            match rest.find("*/") {
+                Some(end) => s = rest[end + 2..].trim_start(),
+                None => return "",
+            }
+        } else {
+            return s;
+        }
     }
 }
 
