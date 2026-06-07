@@ -103,6 +103,17 @@ pub async fn open_connection(state: State<'_, AppState>, id: String) -> Result<T
 
 #[tauri::command]
 pub async fn close_connection(state: State<'_, AppState>, id: String) -> Result<(), AppError> {
+    // Kill any in-flight queries on this connection before tearing the pool down,
+    // otherwise the running statement keeps executing on the server.
+    if let Some(pool) = state.pools.read().await.get(&id).cloned() {
+        let thread_ids: Vec<u32> = {
+            let running = state.running.lock().await;
+            running.values().filter(|r| r.conn_id == id).map(|r| r.thread_id).collect()
+        };
+        for tid in thread_ids {
+            let _ = crate::db::exec::kill_query(&pool, tid).await;
+        }
+    }
     if let Some(p) = state.pools.write().await.remove(&id) {
         p.disconnect().await.ok();
     }

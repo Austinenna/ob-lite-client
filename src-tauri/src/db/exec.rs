@@ -61,10 +61,17 @@ pub async fn collect_result(conn: &mut Conn, sql: &str, max_rows: usize) -> Resu
 }
 
 /// Cancel a running query by issuing `KILL QUERY <thread_id>` on a fresh
-/// connection from the same pool.
+/// connection from the same pool. Falls back to `KILL <thread_id>` (drops the
+/// whole session) if the server rejects `KILL QUERY`.
 pub async fn kill_query(pool: &Pool, thread_id: u32) -> Result<(), AppError> {
+    {
+        let mut conn = pool.get_conn().await?;
+        if conn.query_drop(format!("KILL QUERY {}", thread_id)).await.is_ok() {
+            return Ok(());
+        }
+    }
     let mut conn = pool.get_conn().await?;
-    conn.query_drop(format!("KILL QUERY {}", thread_id)).await?;
+    conn.query_drop(format!("KILL {}", thread_id)).await?;
     Ok(())
 }
 

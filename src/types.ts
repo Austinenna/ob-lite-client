@@ -102,7 +102,7 @@ export interface QueryTab {
   type: "query";
   label: string;
   sql: string;
-  status: "idle" | "running" | "rows" | "affected" | "error" | "cancelled" | "timeout";
+  status: "idle" | "running" | "cancelling" | "rows" | "affected" | "error" | "cancelled" | "timeout";
   layout?: "v" | "h";
   focus?: "editor" | "results" | null;
   editorH?: number;

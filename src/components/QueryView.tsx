@@ -22,7 +22,8 @@ export function QueryView({
   onAfterExec: () => void;
 }) {
   const editorRef = useRef<SqlEditorHandle>(null);
-  const cancelledRef = useRef(false);
+  // holds the queryId the user cancelled, so a late-returning request is ignored
+  const cancelledRef = useRef<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   // server-side pagination state (LIMIT/OFFSET re-issued per page)
@@ -41,15 +42,17 @@ export function QueryView({
     const text = sqlText.trim();
     if (!text) return;
     const queryId = uid("q_");
-    cancelledRef.current = false;
     onUpdateTab({ status: "running", queryId, error: undefined, executedSql: text });
     try {
       const r = await api.executeSql({ id: conn.id, sql: text, queryId, database: db, page, pageSize: size });
+      // if the user asked to cancel, only confirm "cancelled" now that the
+      // request actually returned (i.e. the DB really stopped) — don't show results
+      if (cancelledRef.current === queryId) { onUpdateTab({ status: "cancelled" }); return; }
       setResPage(page);
       onUpdateTab({ status: r.kind === "rows" ? "rows" : "affected", result: r });
     } catch (e) {
-      if (cancelledRef.current) onUpdateTab({ status: "cancelled" });
-      else if (isAppError(e) && e.code === "TIMEOUT") onUpdateTab({ status: "timeout", error: e });
+      if (cancelledRef.current === queryId) { onUpdateTab({ status: "cancelled" }); return; }
+      if (isAppError(e) && e.code === "TIMEOUT") onUpdateTab({ status: "timeout", error: e });
       else onUpdateTab({ status: "error", error: isAppError(e) ? e : { code: "ERR", msg: String(e), zh: "执行失败" } });
     } finally {
       onAfterExec();
@@ -62,15 +65,16 @@ export function QueryView({
   const goPage = (page: number) => run(tab.executedSql || tab.sql, page, resPageSize);
   const changePageSize = (size: number) => { setResPageSize(size); run(tab.executedSql || tab.sql, 1, size); };
 
-  const cancel = async () => {
-    cancelledRef.current = true;
-    if (tab.queryId) {
-      try {
-        await api.cancelQuery(tab.queryId);
-      } catch {
-        /* ignore */
-      }
-    }
+  // Cancel honestly: show "cancelling…" right away and fire the server-side
+  // KILL, but only switch to "cancelled" once the in-flight request actually
+  // returns (handled in run()) — i.e. once the DB has really stopped.
+  // Triggered by the editor's Esc keymap (only while focused) or the button.
+  const cancel = () => {
+    const qid = tab.queryId;
+    if (!qid) { onUpdateTab({ status: "cancelled" }); return; }
+    cancelledRef.current = qid;
+    onUpdateTab({ status: "cancelling" });
+    void api.cancelQuery(qid).catch(() => {});
   };
 
   const startDrag = (e: React.PointerEvent) => {
@@ -111,6 +115,8 @@ export function QueryView({
   const runBtn =
     status === "running" ? (
       <Btn kind="default" onClick={cancel} style={{ color: "#cf5a3a", borderColor: "#f3c3b6" }}>■ 取消</Btn>
+    ) : status === "cancelling" ? (
+      <Btn kind="default" disabled style={{ color: "#cf5a3a", borderColor: "#f3c3b6" }}>取消中…</Btn>
     ) : (
       <Btn kind="primary" onClick={() => runFresh(editorRef.current?.runText())}>
         ▶ 执行<span style={{ opacity: 0.6, marginLeft: 2, fontSize: 11 }}>⌘↵</span>
@@ -195,6 +201,7 @@ function StatusChip({ tab }: { tab: QueryTab }) {
   const ms = tab.result?.durationMs;
   if (status === "idle") return wrap(<>{dot("#cfd0d3")}未执行</>);
   if (status === "running") return wrap(<><span className="ob-spin" style={{ width: 11, height: 11, border: `2px solid ${T.blueSoft}`, borderTopColor: T.blue, borderRadius: "50%", display: "inline-block" }} />执行中…</>);
+  if (status === "cancelling") return wrap(<><span className="ob-spin" style={{ width: 11, height: 11, border: "2px solid #f3c3b6", borderTopColor: "#cf5a3a", borderRadius: "50%", display: "inline-block" }} /><span style={{ color: "#cf5a3a" }}>正在取消…</span></>);
   if (status === "rows") return wrap(<>{dot("#2bb86b")}<b style={{ color: T.text, fontVariantNumeric: "tabular-nums" }}>{tab.result?.rowCount}</b> 行 · <span style={{ fontVariantNumeric: "tabular-nums" }}>{ms} ms</span></>);
   if (status === "affected") return wrap(<>{dot("#2bb86b")}执行成功 · 影响 <b style={{ color: T.text }}>{tab.result?.affected}</b> 行 · {ms} ms</>);
   if (status === "error") return wrap(<>{dot("#cf5a3a")}<span style={{ color: "#cf5a3a", fontWeight: 600 }}>执行失败</span></>);
@@ -228,6 +235,13 @@ function ResultBody({ tab, onToast, onViewCell, onRun, pageRows, rowOffset }: { 
       <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, color: T.dim }}>
         <span className="ob-spin" style={{ width: 16, height: 16, border: `2.5px solid ${T.blueSoft}`, borderTopColor: T.blue, borderRadius: "50%" }} />
         正在执行，可按 esc 取消…
+      </div>
+    );
+  if (status === "cancelling")
+    return (
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, color: "#cf5a3a" }}>
+        <span className="ob-spin" style={{ width: 16, height: 16, border: "2.5px solid #f3c3b6", borderTopColor: "#cf5a3a", borderRadius: "50%" }} />
+        正在取消查询，等待数据库确认停止…
       </div>
     );
   if (status === "cancelled") return empty("⊘", "查询已取消", "上一次执行被手动取消。", <Btn kind="default" onClick={onRun} style={{ marginTop: 6 }}>重新执行</Btn>);
